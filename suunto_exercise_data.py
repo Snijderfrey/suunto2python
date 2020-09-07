@@ -4,23 +4,25 @@
 import json
 import numpy as np
 import pandas as pd
+from scipy.ndimage import median_filter
 import matplotlib.pyplot as plt
 
 
 class exercise_data:
-    '''
-    Imports and parses data recorded by a Suunto Ambit 3 Peak into a Pandas
-    DataFrame.
+    """
+    Imports data recorded by a Suunto Ambit 3 Peak into a Pandas DataFrame.
 
     Currently, the data is imported best from the json file found in the Suunto
     App folder. Generally, an import of json files exported from
     quantified-self.io is also possible, however implemented only very
     rudimentary (might be expanded in the future).
-    '''
+    """
 
     def __init__(self, json_file, mode='suunto_json'):
-        '''
+        """
         Initialize instance of exercise_data.
+
+        Some calculation on the data are performed directly after import.
 
         Parameters
         ----------
@@ -36,25 +38,40 @@ class exercise_data:
         -------
         None.
 
-        '''
+        """
         self.json_file = json_file
         self.mode = mode
         self.parse_json()
 
+        # Some values are calculated from the raw data.
+        # Currently, no arguments are passed to self.filter_ibi() and
+        # self.smooth_ibi. Should be added in the future to allow control over
+        # filters applied.
+        self.ibi_1d_processed = self.ibi_1d
+        self.filter_ibi()
+        self.smooth_ibi()
+        self.replace_processed_ibi(self.ibi_1d_processed)
+        self.exercise_data[('heart_rate', 'raw')] = 60000/np.mean(
+            self.exercise_data['IBI_raw'], axis=1)
+        self.exercise_data[('heart_rate', 'filtered')] = 60000/np.mean(
+            self.exercise_data['IBI_processed'], axis=1)
+        self.exercise_data[('gps', 'Pace')] = 1/self.exercise_data[
+            ('baro', 'Speed')]*1000/60
+
     def parse_json(self):
-        '''
-        Import the json file and parse it into a Pandas DataFrame (currently
-        only for self.mode=='suunto_json', for 'qs_json', basically only the
-        raw data is imported). The data is stored in self.exercise_data. Some
-        calculation on the data are prformed directly after import. Unparsed
-        data is stored in self.unparsed_data and can be inspected for possibly
-        disregarded data.
+        """
+        Import the json file and parse it into a Pandas DataFrame.
+
+        (currently only for self.mode=='suunto_json', for 'qs_json', basically
+        only the raw data is imported). The data is stored in
+        self.exercise_data. Unparsed data is stored in self.unparsed_data and
+        can be inspected for possibly disregarded data.
 
         Returns
         -------
         None.
 
-        '''
+        """
         with open(self.json_file, 'r') as exercise_file:
             self.exercise_raw_data = exercise_file.read()
 
@@ -99,24 +116,24 @@ class exercise_data:
                 pd.Timedelta(ibi.iloc[0].sum(), unit='ms') +
                 pd.to_timedelta(ibi_cumsum, unit='ms'))
 
-            ibi_1d = pd.Series(
+            self.ibi_1d = pd.Series(
                 ibi.stack().values, index=ibi_timeindex.round('S'))
-            index_array = np.ones_like(ibi_1d)
-            multi_index = pd.MultiIndex.from_arrays(
-                [ibi_1d.index, index_array], names=('time', 'data_point'))
-            duplicate_indices = multi_index.duplicated(keep='first')
 
+            index_array = np.ones_like(self.ibi_1d)
+            multi_index = pd.MultiIndex.from_arrays(
+                [self.ibi_1d.index, index_array], names=('time', 'data_point'))
+            duplicate_indices = multi_index.duplicated(keep='first')
             while True in duplicate_indices:
                 index_array += duplicate_indices
                 multi_index = pd.MultiIndex.from_arrays(
-                    [ibi_1d.index, index_array.astype(int)],
+                    [self.ibi_1d.index, index_array.astype(int)],
                     names=('time', 'data_point'))
                 duplicate_indices = multi_index.duplicated(keep='first')
-            ibi_1d.index = multi_index
-            ibi_1d = ibi_1d.unstack()
-            ibi_1d.columns = pd.MultiIndex.from_product(
-                [['IBI'], ibi_1d.columns])
-            ibi = ibi_1d
+            ibi = self.ibi_1d
+            ibi.index = multi_index
+            ibi = ibi.unstack()
+            ibi.columns = pd.MultiIndex.from_product(
+                [['IBI_raw'], ibi.columns])
 
             baro = pd.DataFrame(
                 baro_data, index=pd.to_datetime(baro_time).round(freq='S'))
@@ -128,12 +145,7 @@ class exercise_data:
             self.exercise_data = baro.join(gps).join(ibi)
             self.exercise_data = self.exercise_data[
                 ~self.exercise_data.index.duplicated(keep='first')]
-
-            # some values are calculated from the raw data
-            self.exercise_data[('gps', 'Pace')] = 1/self.exercise_data[
-                ('baro', 'Speed')]*1000/60
-            self.exercise_data[('heart_rate', 'plain')] = 60000/np.mean(
-                self.exercise_data['IBI'], axis=1)
+            self.exercise_data[('baro', 'Cadence')] *= 60
 
             self.unparsed_lines = len(self.exercise_raw_data) - len(
                 processed_samples)
@@ -149,6 +161,86 @@ class exercise_data:
             self.ibi_values = np.array(
                 self.exercise_raw_data['activities'][0]['streams'][6]['data'])
 
+    def smooth_ibi(self, median=True, **kwargs):
+        """
+        Apply smoothing to interbeat intervals (IBIs).
+
+        Parameters
+        ----------
+        median : bool, optional
+            If True, a median filter is applied. The default is True.
+        **kwargs : TYPE
+            median_window : int
+                Is only needed if median is True. Must be an odd number.
+                Default is 5.
+
+        Returns
+        -------
+        None.
+
+        """
+        if median:
+            median_window = kwargs.get('median_window', 5)
+            self.ibi_1d_processed = median_filter(self.ibi_1d_processed,
+                                                  size=median_window)
+        self.ibi_1d_processed = pd.Series(self.ibi_1d_processed,
+                                          index=self.ibi_1d.index)
+
+    def filter_ibi(self, maximum=True, minimum=True, **kwargs):
+        """
+        Apply filters to interbeat intervals (IBIs).
+
+        Filters are applied in the order maximum, minimum. The filtered
+        data is stored in self.ibi_1d_processed. Filtered values are replaced
+        by np.nan.
+
+        Parameters
+        ----------
+        maximum : bool, optional
+            If True, all values above a threshold are removed. The default is
+            True.
+        minimum : bool, optional
+            If True, all values below a threshold are removed. The default is
+            True.
+        **kwargs : TYPE
+            max_thresh : float
+                Is only needed if maximum is True.
+            min_thresh : float
+                Is only needed if minimum is True.
+
+        Returns
+        -------
+        None.
+
+        """
+        if maximum:
+            maximum_threshold = kwargs.get('max_thresh', 60000/40)
+            self.ibi_1d_processed[self.ibi_1d_processed > maximum_threshold] = np.nan
+        if minimum:
+            minimum_threshold = kwargs.get('min_thresh', 60000/220)
+            self.ibi_1d_processed[self.ibi_1d_processed < minimum_threshold] = np.nan
+        self.ibi_1d_processed = pd.Series(self.ibi_1d_processed,
+                                          index=self.ibi_1d.index)
+
+    def replace_processed_ibi(self, filtered_data):
+        """
+        Filter IBI data are added to self.exercise_data.
+
+        Parameters
+        ----------
+        filtered_data : pandas Series
+            A pandas Series similar to self.ibi_1d.
+
+        Returns
+        -------
+        None.
+
+        """
+        filtered_data = pd.DataFrame(self.ibi_1d_processed).unstack()
+        filtered_data.columns = pd.MultiIndex.from_product(
+            [['IBI_processed'], self.exercise_data['IBI_raw'].columns])
+        self.exercise_data = self.exercise_data.join(filtered_data)
+
 
 if __name__ == "__main__":
     Aug_27_2020 = exercise_data(
@@ -159,37 +251,45 @@ if __name__ == "__main__":
     # Plot of the gps coordinates passed during the exercise ('map').
     plt.figure(0)
     plt.scatter(
-        Sep_5_2020.exercise_data[('gps', 'Longitude')],
-        Sep_5_2020.exercise_data[('gps', 'Latitude')])
+        Aug_27_2020.exercise_data[('gps', 'Longitude')],
+        Aug_27_2020.exercise_data[('gps', 'Latitude')])
 
     # Plot of altitude, heart rate and pace over exercise time
     fig1, (ax0, ax1, ax2) = plt.subplots(nrows=3, ncols=1, sharex=True)
-    ax0.plot(Sep_5_2020.exercise_data.index[1:],
-             Sep_5_2020.exercise_data[('baro', 'Altitude')][1:])
+    ax0.plot(Aug_27_2020.exercise_data.index[1:],
+             Aug_27_2020.exercise_data[('baro', 'Altitude')][1:])
     ax0.grid(True)
     ax0.set_xlabel('time')
     ax0.set_ylabel('altitude [m]')
-    ax1.plot(Sep_5_2020.exercise_data.index[1:],
-             Sep_5_2020.exercise_data[('heart_rate', 'plain')][1:])
+    ax1.plot(Aug_27_2020.exercise_data.index[1:],
+             Aug_27_2020.exercise_data[('heart_rate', 'raw')][1:])
     ax1.grid(True)
     ax1.set_xlabel('time')
     ax1.set_ylabel('heart rate [1/min]')
-    ax2.plot(Sep_5_2020.exercise_data.index[1:],
-             Sep_5_2020.exercise_data[('gps', 'Pace')][1:])
+    ax2.plot(Aug_27_2020.exercise_data.index[1:],
+             Aug_27_2020.exercise_data[('gps', 'Pace')][1:])
     ax2.grid(True)
     ax2.set_xlabel('time')
     ax2.set_ylabel('pace [min/km]')
     ax2.set_ylim(4, 8)
     ax2.set_xlim(
-        Sep_5_2020.exercise_data.index[1], Sep_5_2020.exercise_data.index[-1])
+        Aug_27_2020.exercise_data.index[1], Aug_27_2020.exercise_data.index[-1])
 
     # Plot of IBI values over time
-    all_ibis = Sep_5_2020.exercise_data['IBI'].stack()
-    ibi_time_values = all_ibis.index.get_level_values(0)
+    all_ibis = Aug_27_2020.exercise_data['IBI_raw'].stack()
+    ibi_time_values = np.cumsum(np.diff(all_ibis.index.get_level_values(0)))
+    ibi_time_values = np.concatenate(([pd.Timedelta(0)], ibi_time_values))
+    ibi_time_values = pd.Series(ibi_time_values)/10**9
 
-    # plt.figure(2)
-    # plt.plot(ibi_time_values[:-1], all_ibis[:-1])
+    plt.figure(2)
+    ax3 = plt.subplot()
+    ax3.plot(ibi_time_values[:-1], all_ibis[:-1])
+    ax3.set_xlabel('time [s]')
+    ax3.set_ylabel('IBI [ms]')
 
     # Poincaré-Plot of IBI values
     plt.figure(3)
-    plt.scatter(all_ibis.values[:-2], np.roll(all_ibis.values[:-1], -1)[:-1])
+    ax4 = plt.subplot()
+    ax4.scatter(all_ibis.values[:-2], np.roll(all_ibis.values[:-1], -1)[:-1])
+    ax4.set_xlabel('IBI(n) [ms]')
+    ax4.set_ylabel('IBI(n+1) [ms]')
