@@ -49,7 +49,7 @@ class exercise_data:
         # filters applied.
         self.ibi_1d_processed = self.ibi_1d
         self.filter_ibi()
-        self.smooth_ibi()
+        #self.smooth_ibi()
         self.replace_processed_ibi(self.ibi_1d_processed)
         self.exercise_data[('heart_rate', 'raw')] = 60000/np.mean(
             self.exercise_data['IBI_raw'], axis=1)
@@ -186,7 +186,7 @@ class exercise_data:
         self.ibi_1d_processed = pd.Series(self.ibi_1d_processed,
                                           index=self.ibi_1d.index)
 
-    def filter_ibi(self, maximum=True, minimum=True, **kwargs):
+    def filter_ibi(self, maximum=True, minimum=True, lowpass=True, **kwargs):
         """
         Apply filters to interbeat intervals (IBIs).
 
@@ -213,12 +213,23 @@ class exercise_data:
         None.
 
         """
+        if lowpass:
+            weights = kwargs.get('weights', [True, True, False, True, True])
+            window_size = len(weights)
+            std_factor = 2
+            mov_avg, mov_std = selective_moving_average(self.ibi_1d_processed.values, weights)
+            
+            diffs = np.absolute(
+                self.ibi_1d_processed[window_size//2:-window_size//2+1] - 
+                mov_avg)
+            self.ibi_1d_processed[window_size//2:-window_size//2+1][diffs > std_factor*mov_std] = np.nan
         if maximum:
             maximum_threshold = kwargs.get('max_thresh', 60000/40)
             self.ibi_1d_processed[self.ibi_1d_processed > maximum_threshold] = np.nan
         if minimum:
             minimum_threshold = kwargs.get('min_thresh', 60000/220)
             self.ibi_1d_processed[self.ibi_1d_processed < minimum_threshold] = np.nan
+            
         self.ibi_1d_processed = pd.Series(self.ibi_1d_processed,
                                           index=self.ibi_1d.index)
 
@@ -241,6 +252,18 @@ class exercise_data:
             [['IBI_processed'], self.exercise_data['IBI_raw'].columns])
         self.exercise_data = self.exercise_data.join(filtered_data)
 
+def selective_moving_average(values, weights):
+    window_size = len(weights)
+    value_count = len(values)
+    remaining_values = value_count-window_size+1
+
+    column_indices = np.repeat(
+        np.arange(window_size)[np.newaxis], remaining_values, axis=0
+        ) + np.arange(remaining_values)[:, np.newaxis]
+    column_indices = column_indices[:, weights]
+
+    value_array = np.squeeze(values[np.newaxis][:, column_indices])
+    return (np.mean(value_array, axis=1), np.std(value_array, axis=1))
 
 if __name__ == "__main__":
     Aug_27_2020 = exercise_data(
@@ -248,35 +271,37 @@ if __name__ == "__main__":
     Sep_5_2020 = exercise_data(
         '/home/almami/Alexander/Suunto-Daten/entry_1353082632_1599316472/samples.json')
 
+    plot_data = Sep_5_2020
+
     # Plot of the gps coordinates passed during the exercise ('map').
     plt.figure(0)
     plt.scatter(
-        Aug_27_2020.exercise_data[('gps', 'Longitude')],
-        Aug_27_2020.exercise_data[('gps', 'Latitude')])
+        plot_data.exercise_data[('gps', 'Longitude')],
+        plot_data.exercise_data[('gps', 'Latitude')])
 
     # Plot of altitude, heart rate and pace over exercise time
     fig1, (ax0, ax1, ax2) = plt.subplots(nrows=3, ncols=1, sharex=True)
-    ax0.plot(Aug_27_2020.exercise_data.index[1:],
-             Aug_27_2020.exercise_data[('baro', 'Altitude')][1:])
+    ax0.plot(plot_data.exercise_data.index[1:],
+             plot_data.exercise_data[('baro', 'Altitude')][1:])
     ax0.grid(True)
     ax0.set_xlabel('time')
     ax0.set_ylabel('altitude [m]')
-    ax1.plot(Aug_27_2020.exercise_data.index[1:],
-             Aug_27_2020.exercise_data[('heart_rate', 'raw')][1:])
+    ax1.plot(plot_data.exercise_data.index[1:],
+             plot_data.exercise_data[('heart_rate', 'raw')][1:])
     ax1.grid(True)
     ax1.set_xlabel('time')
     ax1.set_ylabel('heart rate [1/min]')
-    ax2.plot(Aug_27_2020.exercise_data.index[1:],
-             Aug_27_2020.exercise_data[('gps', 'Pace')][1:])
+    ax2.plot(plot_data.exercise_data.index[1:],
+             plot_data.exercise_data[('gps', 'Pace')][1:])
     ax2.grid(True)
     ax2.set_xlabel('time')
     ax2.set_ylabel('pace [min/km]')
     ax2.set_ylim(4, 8)
     ax2.set_xlim(
-        Aug_27_2020.exercise_data.index[1], Aug_27_2020.exercise_data.index[-1])
+        plot_data.exercise_data.index[1], plot_data.exercise_data.index[-1])
 
     # Plot of IBI values over time
-    all_ibis = Aug_27_2020.exercise_data['IBI_raw'].stack()
+    all_ibis = plot_data.exercise_data['IBI_processed'].stack()
     ibi_time_values = np.cumsum(np.diff(all_ibis.index.get_level_values(0)))
     ibi_time_values = np.concatenate(([pd.Timedelta(0)], ibi_time_values))
     ibi_time_values = pd.Series(ibi_time_values)/10**9
