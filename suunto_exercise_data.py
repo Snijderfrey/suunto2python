@@ -7,6 +7,8 @@ import pandas as pd
 from scipy.ndimage import median_filter
 import matplotlib.pyplot as plt
 
+from pyPreprocessing.smoothing import smoothing, filtering
+
 
 class exercise_data:
     """
@@ -47,9 +49,10 @@ class exercise_data:
         # Currently, no arguments are passed to self.filter_ibi() and
         # self.smooth_ibi. Should be added in the future to allow control over
         # filters applied.
-        self.ibi_1d_processed = self.ibi_1d
-        self.filter_ibi()
-        #self.smooth_ibi()
+        self.ibi_1d_processed = self.ibi_1d.copy()
+        self.filter_ibi(maximum=True, minimum=True, lowpass=True,
+                        std_factor=2)
+        self.smooth_ibi(median=True)
         self.replace_processed_ibi(self.ibi_1d_processed)
         self.exercise_data[('heart_rate', 'raw')] = 60000/np.mean(
             self.exercise_data['IBI_raw'], axis=1)
@@ -215,21 +218,17 @@ class exercise_data:
         """
         if lowpass:
             weights = kwargs.get('weights', [True, True, False, True, True])
-            window_size = len(weights)
-            std_factor = 2
-            mov_avg, mov_std = selective_moving_average(self.ibi_1d_processed.values, weights)
-            
-            diffs = np.absolute(
-                self.ibi_1d_processed[window_size//2:-window_size//2+1] - 
-                mov_avg)
-            self.ibi_1d_processed[window_size//2:-window_size//2+1][diffs > std_factor*mov_std] = np.nan
+            std_factor = kwargs.get('std_factor', 2)
+            self.ibi_1d_processed = np.squeeze(filtering(
+                self.ibi_1d_processed.values[np.newaxis], 'spike_filter',
+                weights=weights, std_factor=std_factor))
         if maximum:
             maximum_threshold = kwargs.get('max_thresh', 60000/40)
             self.ibi_1d_processed[self.ibi_1d_processed > maximum_threshold] = np.nan
         if minimum:
             minimum_threshold = kwargs.get('min_thresh', 60000/220)
             self.ibi_1d_processed[self.ibi_1d_processed < minimum_threshold] = np.nan
-            
+
         self.ibi_1d_processed = pd.Series(self.ibi_1d_processed,
                                           index=self.ibi_1d.index)
 
@@ -252,18 +251,6 @@ class exercise_data:
             [['IBI_processed'], self.exercise_data['IBI_raw'].columns])
         self.exercise_data = self.exercise_data.join(filtered_data)
 
-def selective_moving_average(values, weights):
-    window_size = len(weights)
-    value_count = len(values)
-    remaining_values = value_count-window_size+1
-
-    column_indices = np.repeat(
-        np.arange(window_size)[np.newaxis], remaining_values, axis=0
-        ) + np.arange(remaining_values)[:, np.newaxis]
-    column_indices = column_indices[:, weights]
-
-    value_array = np.squeeze(values[np.newaxis][:, column_indices])
-    return (np.mean(value_array, axis=1), np.std(value_array, axis=1))
 
 if __name__ == "__main__":
     Aug_27_2020 = exercise_data(
@@ -271,7 +258,7 @@ if __name__ == "__main__":
     Sep_5_2020 = exercise_data(
         '/home/almami/Alexander/Suunto-Daten/entry_1353082632_1599316472/samples.json')
 
-    plot_data = Sep_5_2020
+    plot_data = Aug_27_2020
 
     # Plot of the gps coordinates passed during the exercise ('map').
     plt.figure(0)
@@ -287,7 +274,7 @@ if __name__ == "__main__":
     ax0.set_xlabel('time')
     ax0.set_ylabel('altitude [m]')
     ax1.plot(plot_data.exercise_data.index[1:],
-             plot_data.exercise_data[('heart_rate', 'raw')][1:])
+             plot_data.exercise_data[('heart_rate', 'filtered')][1:])
     ax1.grid(True)
     ax1.set_xlabel('time')
     ax1.set_ylabel('heart rate [1/min]')
