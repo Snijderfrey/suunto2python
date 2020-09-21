@@ -58,8 +58,9 @@ class exercise_data:
             self.exercise_data['IBI_raw'], axis=1)
         self.exercise_data[('heart_rate', 'filtered')] = 60000/np.mean(
             self.exercise_data['IBI_processed'], axis=1)
-        self.exercise_data[('gps', 'Pace')] = 1/self.exercise_data[
-            ('baro', 'Speed')]*1000/60
+        if ('baro', 'Speed') in self.exercise_data.columns:
+            self.exercise_data[('gps', 'Pace')] = 1/self.exercise_data[
+                ('baro', 'Speed')]*1000/60
 
     def parse_json(self):
         """
@@ -79,7 +80,7 @@ class exercise_data:
             self.exercise_raw_data = exercise_file.read()
 
         if self.mode == 'suunto_json':  # json file stored by the Suunto
-            # Android App. There seems to be a problem with the cadence data.
+            # Android App.
             self.exercise_raw_data = np.array(
                 json.loads(self.exercise_raw_data)['Samples'])
 
@@ -145,10 +146,20 @@ class exercise_data:
                 gps_data, index=pd.to_datetime(gps_time).round(freq='S'))
             gps.columns = pd.MultiIndex.from_product([['gps'], gps.columns])
 
-            self.exercise_data = baro.join(gps).join(ibi)
+            print('gps.shape ', len(gps))
+            print('baro.shape ', len(baro))
+            print('ibi.shape ', len(ibi))
+
+            self.exercise_data = baro
+            for ii in [gps, ibi]:
+                if len(ii) > 0:
+                    self.exercise_data = self.exercise_data.join(ii)
+
             self.exercise_data = self.exercise_data[
                 ~self.exercise_data.index.duplicated(keep='first')]
-            self.exercise_data[('baro', 'Cadence')] *= 60
+
+            if ('baro', 'Cadence') in self.exercise_data.columns:
+                self.exercise_data[('baro', 'Cadence')] *= 60
 
             self.unparsed_lines = len(self.exercise_raw_data) - len(
                 processed_samples)
@@ -205,11 +216,18 @@ class exercise_data:
         minimum : bool, optional
             If True, all values below a threshold are removed. The default is
             True.
+        lowpass : bool, optional
+            If True, data is filtered based on selective moving average. The
+            default is True.
         **kwargs : TYPE
             max_thresh : float
                 Is only needed if maximum is True.
             min_thresh : float
                 Is only needed if minimum is True.
+            weights : list of bool
+                Only needed if lowpass is True.
+            std_factor : float
+                Only needed if lowpass is True.
 
         Returns
         -------
@@ -223,7 +241,7 @@ class exercise_data:
                 self.ibi_1d_processed.values[np.newaxis], 'spike_filter',
                 weights=weights, std_factor=std_factor))
         if maximum:
-            maximum_threshold = kwargs.get('max_thresh', 60000/40)
+            maximum_threshold = kwargs.get('max_thresh', 60000/25)
             self.ibi_1d_processed[self.ibi_1d_processed > maximum_threshold] = np.nan
         if minimum:
             minimum_threshold = kwargs.get('min_thresh', 60000/220)
@@ -257,51 +275,60 @@ if __name__ == "__main__":
         '/home/almami/Alexander/Suunto-Daten/entry_-335030377_1598542618/samples.json')
     Sep_5_2020 = exercise_data(
         '/home/almami/Alexander/Suunto-Daten/entry_1353082632_1599316472/samples.json')
+    Sep_20_2020 = exercise_data(
+        '/home/almami/Alexander/Suunto-Daten/entry_1993441714_1600629134/samples.json')
+    Sep_21_2020_sleep = exercise_data(
+        '/home/almami/Alexander/Suunto-Daten/entry_1994106508_1600646290/samples.json')
 
-    plot_data = Aug_27_2020
+    plot_data = [Sep_20_2020, Sep_21_2020_sleep]
 
-    # Plot of the gps coordinates passed during the exercise ('map').
-    plt.figure(0)
-    plt.scatter(
-        plot_data.exercise_data[('gps', 'Longitude')],
-        plot_data.exercise_data[('gps', 'Latitude')])
+    # # Plot of the gps coordinates passed during the exercise ('map').
+    # plt.figure(0)
+    # plt.scatter(
+    #     plot_data.exercise_data[('gps', 'Longitude')],
+    #     plot_data.exercise_data[('gps', 'Latitude')])
 
-    # Plot of altitude, heart rate and pace over exercise time
-    fig1, (ax0, ax1, ax2) = plt.subplots(nrows=3, ncols=1, sharex=True)
-    ax0.plot(plot_data.exercise_data.index[1:],
-             plot_data.exercise_data[('baro', 'Altitude')][1:])
-    ax0.grid(True)
-    ax0.set_xlabel('time')
-    ax0.set_ylabel('altitude [m]')
-    ax1.plot(plot_data.exercise_data.index[1:],
-             plot_data.exercise_data[('heart_rate', 'filtered')][1:])
-    ax1.grid(True)
-    ax1.set_xlabel('time')
-    ax1.set_ylabel('heart rate [1/min]')
-    ax2.plot(plot_data.exercise_data.index[1:],
-             plot_data.exercise_data[('gps', 'Pace')][1:])
-    ax2.grid(True)
-    ax2.set_xlabel('time')
-    ax2.set_ylabel('pace [min/km]')
-    ax2.set_ylim(4, 8)
-    ax2.set_xlim(
-        plot_data.exercise_data.index[1], plot_data.exercise_data.index[-1])
+    # # Plot of altitude, heart rate and pace over exercise time
+    # fig1, (ax0, ax1, ax2) = plt.subplots(nrows=3, ncols=1, sharex=True)
+    # ax0.plot(plot_data.exercise_data.index[1:],
+    #          plot_data.exercise_data[('baro', 'Altitude')][1:])
+    # ax0.grid(True)
+    # ax0.set_xlabel('time')
+    # ax0.set_ylabel('altitude [m]')
+    # ax1.plot(plot_data.exercise_data.index[1:],
+    #          plot_data.exercise_data[('heart_rate', 'filtered')][1:])
+    # ax1.grid(True)
+    # ax1.set_xlabel('time')
+    # ax1.set_ylabel('heart rate [1/min]')
+    # ax2.plot(plot_data.exercise_data.index[1:],
+    #          plot_data.exercise_data[('gps', 'Pace')][1:])
+    # ax2.grid(True)
+    # ax2.set_xlabel('time')
+    # ax2.set_ylabel('pace [min/km]')
+    # ax2.set_ylim(4, 8)
+    # ax2.set_xlim(
+    #     plot_data.exercise_data.index[1], plot_data.exercise_data.index[-1])
 
-    # Plot of IBI values over time
-    all_ibis = plot_data.exercise_data['IBI_processed'].stack()
-    ibi_time_values = np.cumsum(np.diff(all_ibis.index.get_level_values(0)))
-    ibi_time_values = np.concatenate(([pd.Timedelta(0)], ibi_time_values))
-    ibi_time_values = pd.Series(ibi_time_values)/10**9
+    fig_counter = 0
+    for curr_data in plot_data:
+        # Plot of IBI values over time
+        all_ibis = curr_data.exercise_data['IBI_processed'].stack()
+        ibi_time_values = np.cumsum(np.diff(all_ibis.index.get_level_values(0)))
+        ibi_time_values = np.concatenate(([pd.Timedelta(0)], ibi_time_values))
+        ibi_time_values = pd.Series(ibi_time_values)/10**9
+    
+        plt.figure(fig_counter)
+        ax3 = plt.subplot()
+        ax3.plot(ibi_time_values[:-1], all_ibis[:-1])
+        ax3.set_xlabel('time [s]')
+        ax3.set_ylabel('IBI [ms]')
+        fig_counter += 1
+    
+        # Poincaré-Plot of IBI values
+        plt.figure(fig_counter)
+        ax4 = plt.subplot()
+        ax4.scatter(all_ibis.values[:-2], np.roll(all_ibis.values[:-1], -1)[:-1])
+        ax4.set_xlabel('IBI(n) [ms]')
+        ax4.set_ylabel('IBI(n+1) [ms]')
+        fig_counter += 1
 
-    plt.figure(2)
-    ax3 = plt.subplot()
-    ax3.plot(ibi_time_values[:-1], all_ibis[:-1])
-    ax3.set_xlabel('time [s]')
-    ax3.set_ylabel('IBI [ms]')
-
-    # Poincaré-Plot of IBI values
-    plt.figure(3)
-    ax4 = plt.subplot()
-    ax4.scatter(all_ibis.values[:-2], np.roll(all_ibis.values[:-1], -1)[:-1])
-    ax4.set_xlabel('IBI(n) [ms]')
-    ax4.set_ylabel('IBI(n+1) [ms]')
