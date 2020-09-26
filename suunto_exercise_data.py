@@ -224,7 +224,7 @@ class exercise_data:
                 Is only needed if maximum is True.
             min_thresh : float
                 Is only needed if minimum is True.
-            weights : list of bool
+            weights : list of float
                 Only needed if lowpass is True.
             std_factor : float
                 Only needed if lowpass is True.
@@ -235,7 +235,7 @@ class exercise_data:
 
         """
         if lowpass:
-            weights = kwargs.get('weights', [True, True, False, True, True])
+            weights = kwargs.get('weights', [1, 1, 0, 1, 1])
             std_factor = kwargs.get('std_factor', 2)
             self.ibi_1d_processed = np.squeeze(filtering(
                 self.ibi_1d_processed.values[np.newaxis], 'spike_filter',
@@ -279,8 +279,10 @@ if __name__ == "__main__":
         '/home/almami/Alexander/Suunto-Daten/entry_1993441714_1600629134/samples.json')
     Sep_21_2020_sleep = exercise_data(
         '/home/almami/Alexander/Suunto-Daten/entry_1994106508_1600646290/samples.json')
+    Sep_22_2020_sleep = exercise_data(
+        '/home/almami/Alexander/Suunto-Daten/entry_-814840220_1600732252/samples.json')
 
-    plot_data = [Sep_20_2020, Sep_21_2020_sleep]
+    plot_data = [Sep_20_2020, Sep_21_2020_sleep, Sep_22_2020_sleep]
 
     # # Plot of the gps coordinates passed during the exercise ('map').
     # plt.figure(0)
@@ -322,6 +324,7 @@ if __name__ == "__main__":
         ax3.plot(ibi_time_values[:-1], all_ibis[:-1])
         ax3.set_xlabel('time [s]')
         ax3.set_ylabel('IBI [ms]')
+        ax3.set_ylim(300, 2000)
         fig_counter += 1
     
         # Poincaré-Plot of IBI values
@@ -330,5 +333,6 @@ if __name__ == "__main__":
         ax4.scatter(all_ibis.values[:-2], np.roll(all_ibis.values[:-1], -1)[:-1])
         ax4.set_xlabel('IBI(n) [ms]')
         ax4.set_ylabel('IBI(n+1) [ms]')
+        ax4.set_xlim(300, 2000)
+        ax4.set_ylim(300, 2000)
         fig_counter += 1
-
