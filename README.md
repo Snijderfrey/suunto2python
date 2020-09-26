@@ -2,9 +2,8 @@
 Import exercise data recorded with Suunto Ambit 3 Peak from Suunto App json
 files. 
 
-The data processing uses functions from
-https://github.com/Snijderfrey/pyPreprocessing,
-so that needs to be available.
+The data is stored in a Pandas Dataframe and some calculations rely on
+Numpy, so both have to be available.
 
 The current version is in an early development stage, but was tested
 successfully with data obtained with a Suunto Ambit 3 Peak that were
