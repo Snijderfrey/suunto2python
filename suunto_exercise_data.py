@@ -7,7 +7,7 @@ import pandas as pd
 from scipy.ndimage import median_filter
 import matplotlib.pyplot as plt
 
-from pyPreprocessing.smoothing import smoothing, filtering
+from pyPreprocessing.smoothing import filtering
 
 
 class exercise_data:
@@ -145,10 +145,6 @@ class exercise_data:
             gps = pd.DataFrame(
                 gps_data, index=pd.to_datetime(gps_time).round(freq='S'))
             gps.columns = pd.MultiIndex.from_product([['gps'], gps.columns])
-
-            print('gps.shape ', len(gps))
-            print('baro.shape ', len(baro))
-            print('ibi.shape ', len(ibi))
 
             self.exercise_data = baro
             for ii in [gps, ibi]:
