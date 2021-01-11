@@ -1,6 +1,6 @@
 # suunto2python
-Import exercise data recorded with Suunto Ambit 3 Peak from Suunto App json
-files. 
+Import exercise data recorded with Suunto Ambit 3 Peak from Suunto App zip and
+json files. 
 
 The data is stored in a Pandas Dataframe and some calculations rely on
 Numpy, so both have to be available.
@@ -13,5 +13,5 @@ sleep data (containing only barometer and heart rate data).  It might
 work as well with other Suunto watches and data, but could not be tested,
 yet. 
 
-Json files that can be used for data import were found in the Android data
-folder of the Suunto App. 
+Zip and json files that can be used for data import were found in the Android
+data folder of the Suunto App. 
